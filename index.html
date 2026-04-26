@@ -19,7 +19,11 @@
     <div class="select-wrap">
       <select id="preset" aria-label="Preset pattern">
         <option value="">— preset —</option>
+        <option value="__import__">+ Import RLE…</option>
       </select>
+    </div>
+    <div class="select-wrap rule-select-wrap">
+      <select id="rule" aria-label="Rule"></select>
     </div>
     <button id="fullscreen-btn" class="btn icon" title="Fullscreen" aria-label="Fullscreen">
       <svg class="ico-fs-enter" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -44,7 +48,7 @@
   </aside>
 
   <footer class="hud hud-bc controls">
-    <button id="step-back" class="btn icon" title="Step back (not supported in basic life)" disabled>
+    <button id="step-back" class="btn icon" title="Step back (←)">
       <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor"><path d="M6 6h2v12H6zM20 6 9 12l11 6z"/></svg>
     </button>
     <button id="step" class="btn icon" title="Step (→)">
@@ -68,6 +72,11 @@
 
   <div class="zen-hint"><kbd>h</kbd> show controls</div>
 
+  <div class="zen-conway-logo" aria-hidden="true">
+    <img class="conway-icon" src="Conway-Icon.png" alt="" />
+    <img class="conway-text" src="Conway-Text.png" alt="" />
+  </div>
+
   <div id="settings-modal" class="modal" hidden>
     <div class="modal-backdrop" data-close></div>
     <div class="modal-panel" role="dialog" aria-labelledby="settings-title" aria-modal="true">
@@ -79,6 +88,59 @@
       </header>
 
       <div class="modal-body">
+        <section class="settings-section">
+          <h3>Rule</h3>
+          <p class="section-desc">Conway's Life is <code>B3/S23</code>. Tweak the digits to play other cellular automata.</p>
+          <div class="row binding"><span class="row-title">Preset</span>
+            <select id="rule-preset"></select></div>
+          <div class="rule-editor">
+            <div class="rule-row"><span class="rule-lbl">B</span>
+              <div class="digit-buttons" data-rule-row="birth"></div>
+            </div>
+            <div class="rule-row"><span class="rule-lbl">S</span>
+              <div class="digit-buttons" data-rule-row="survive"></div>
+            </div>
+            <div class="rule-row notation-row">
+              <span class="rule-lbl">B/S</span>
+              <input id="rule-text" type="text" spellcheck="false" autocapitalize="off" autocomplete="off" />
+            </div>
+          </div>
+        </section>
+
+        <section class="settings-section">
+          <h3>Entropy</h3>
+          <p class="section-desc">Sprinkle small bursts of life inside the visible viewport. Helps stuck patterns get unstuck — handy for screensaver use.</p>
+          <label class="row">
+            <span class="row-label">
+              <span class="row-title">Enable entropy</span>
+            </span>
+            <span class="switch">
+              <input type="checkbox" id="entropy-enabled" />
+              <span class="track" aria-hidden="true"></span>
+            </span>
+          </label>
+          <div class="row">
+            <span class="row-label">
+              <span class="row-title">Rate</span>
+              <span class="row-desc">events per generation</span>
+            </span>
+            <div class="entropy-rate">
+              <input id="entropy-rate" type="range" min="0" max="5" step="0.1" value="1" />
+              <span id="entropy-rate-val" class="val">1.0</span>
+            </div>
+          </div>
+          <label class="row">
+            <span class="row-label">
+              <span class="row-title">Cull off-screen</span>
+              <span class="row-desc">Cells that drift outside the viewport die.</span>
+            </span>
+            <span class="switch">
+              <input type="checkbox" id="entropy-cull" />
+              <span class="track" aria-hidden="true"></span>
+            </span>
+          </label>
+        </section>
+
         <section class="settings-section">
           <h3>Input bindings</h3>
           <p class="section-desc">Pick the gesture you'd rather use. Conflicts get resolved automatically.</p>
@@ -105,6 +167,30 @@
       <footer class="modal-foot">
         <button id="settings-reset" class="btn ghost">Reset to defaults</button>
         <button class="btn" data-close>Done</button>
+      </footer>
+    </div>
+  </div>
+
+  <div id="import-modal" class="modal" hidden>
+    <div class="modal-backdrop" data-close></div>
+    <div class="modal-panel" role="dialog" aria-labelledby="import-title" aria-modal="true">
+      <header class="modal-head">
+        <h2 id="import-title">Import RLE</h2>
+        <button class="btn icon modal-x" data-close aria-label="Close">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </button>
+      </header>
+      <div class="modal-body">
+        <p class="section-desc">Paste an <a href="https://conwaylife.com/wiki/Run_Length_Encoded" target="_blank" rel="noopener">RLE pattern</a> from LifeWiki or anywhere else. Comments and headers are honored.</p>
+        <textarea id="rle-input" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="#N Glider&#10;x = 3, y = 3, rule = B3/S23&#10;bob$2bo$3o!"></textarea>
+        <div id="rle-status" class="rle-status"></div>
+      </div>
+      <footer class="modal-foot">
+        <span class="modal-foot-spacer"></span>
+        <div class="foot-actions">
+          <button class="btn ghost" data-close>Cancel</button>
+          <button id="rle-load" class="btn primary">Load</button>
+        </div>
       </footer>
     </div>
   </div>

@@ -81,6 +81,17 @@ export class Renderer {
     ];
   }
 
+  /** Inclusive world-cell rectangle currently visible on screen. */
+  viewportBounds() {
+    const { width, height, zoom, tx, ty } = this;
+    return [
+      Math.floor((0      - tx) / zoom),
+      Math.floor((0      - ty) / zoom),
+      Math.ceil ((width  - tx) / zoom) - 1,
+      Math.ceil ((height - ty) / zoom) - 1,
+    ];
+  }
+
   /** Zoom around a screen anchor (mouse position). */
   zoomAt(sx, sy, factor) {
     const newZoom = Math.max(this.minZoom, Math.min(this.maxZoom, this.zoom * factor));

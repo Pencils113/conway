@@ -3,6 +3,11 @@ import { Renderer } from './renderer.js';
 import { PRESETS, getPreset } from './presets.js';
 import { findIsolatedTubCells } from './patterns.js';
 import * as settings from './settings.js';
+import {
+  NAMED_RULES, parseRule, formatRule, findNamedRule, ruleAllowsBirthOfNothing,
+} from './rules.js';
+import { parseRLE } from './rle.js';
+import * as entropy from './entropy.js';
 
 const canvas = document.getElementById('stage');
 const life = new Life();
@@ -26,13 +31,25 @@ const $settingsModal = document.getElementById('settings-modal');
 const $settingsReset = document.getElementById('settings-reset');
 const $conwayMode    = document.getElementById('conway-mode');
 const $fullscreenBtn = document.getElementById('fullscreen-btn');
+const $rule          = document.getElementById('rule');
+const $rulePreset    = document.getElementById('rule-preset');
+const $ruleText      = document.getElementById('rule-text');
+const $importModal   = document.getElementById('import-modal');
+const $rleInput      = document.getElementById('rle-input');
+const $rleStatus     = document.getElementById('rle-status');
+const $rleLoad       = document.getElementById('rle-load');
+const $entropyEnabled = document.getElementById('entropy-enabled');
+const $entropyRate    = document.getElementById('entropy-rate');
+const $entropyRateVal = document.getElementById('entropy-rate-val');
+const $entropyCull    = document.getElementById('entropy-cull');
 
 // --- Populate presets ---
 for (const p of PRESETS) {
   const opt = document.createElement('option');
   opt.value = p.id;
   opt.textContent = p.name;
-  $preset.appendChild(opt);
+  // Insert before the "+ Import RLE..." option, so import stays at the bottom.
+  $preset.insertBefore(opt, $preset.querySelector('option[value="__import__"]'));
 }
 
 // --- Speed: log scale 0.5 .. 200 steps/sec ---
@@ -64,6 +81,118 @@ function updateStats() {
   $gen.textContent = life.generation.toLocaleString();
   $pop.textContent = life.population.toLocaleString();
 }
+
+// ============================================================================
+//  Rules: top-bar selector + settings editor (digit buttons + notation field).
+//  All three views are projections of the single `settings.rule` string. We
+//  rebuild the dropdown contents only when needed (custom <-> named transition)
+//  and toggle the digit buttons in place for the common case.
+// ============================================================================
+
+const ALL_RULE_SELECTS = [$rule, $rulePreset];
+const CUSTOM_VALUE = '__custom__';
+
+function rebuildRuleSelects(currentRule) {
+  const named = findNamedRule(currentRule);
+  for (const sel of ALL_RULE_SELECTS) {
+    sel.innerHTML = '';
+    if (!named) {
+      const opt = new Option(`Custom · ${formatRule(currentRule)}`, CUSTOM_VALUE);
+      sel.appendChild(opt);
+    }
+    for (const r of NAMED_RULES) {
+      sel.appendChild(new Option(`${r.name}  ·  ${r.notation}`, r.notation));
+    }
+    sel.value = named ? named.notation : CUSTOM_VALUE;
+  }
+}
+
+// Build digit buttons once (B0-B8 and S0-S8).
+for (const row of document.querySelectorAll('[data-rule-row]')) {
+  const which = row.dataset.ruleRow; // 'birth' | 'survive'
+  for (let i = 0; i <= 8; i++) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'digit-btn';
+    b.textContent = String(i);
+    b.dataset.bit = String(i);
+    b.dataset.row = which;
+    // B0 ("born from nothing") would make every empty cell alive — incompatible
+    // with our sparse representation. Disable that one button.
+    if (which === 'birth' && i === 0) {
+      b.classList.add('disabled');
+      b.title = 'B0 is not supported (every empty cell would become alive).';
+    } else {
+      b.addEventListener('click', () => toggleRuleBit(which, i));
+    }
+    row.appendChild(b);
+  }
+}
+
+function toggleRuleBit(row, n) {
+  const cur = parseRule(settings.get().rule);
+  if (!cur) return;
+  const mask = 1 << n;
+  const next = { ...cur };
+  if (row === 'birth')   next.birth   ^= mask;
+  if (row === 'survive') next.survive ^= mask;
+  if (ruleAllowsBirthOfNothing(next)) return;
+  settings.setRule(next);
+}
+
+function syncRuleEditor(currentRule) {
+  // Digit buttons.
+  for (const btn of document.querySelectorAll('.digit-btn')) {
+    const n = +btn.dataset.bit;
+    const mask = 1 << n;
+    const on = btn.dataset.row === 'birth'
+      ? !!(currentRule.birth & mask)
+      : !!(currentRule.survive & mask);
+    btn.classList.toggle('on', on);
+  }
+  // Notation field — only update when the user isn't actively editing it.
+  if (document.activeElement !== $ruleText) {
+    $ruleText.value = formatRule(currentRule);
+    $ruleText.classList.remove('invalid');
+  }
+}
+
+// User picks a rule from either dropdown.
+for (const sel of ALL_RULE_SELECTS) {
+  sel.addEventListener('change', () => {
+    const v = sel.value;
+    if (v === CUSTOM_VALUE) {
+      // No-op: this option only exists to display the current custom rule.
+      // Re-sync to undo any visual change.
+      syncRuleSelects(parseRule(settings.get().rule));
+      return;
+    }
+    settings.setRule(v);
+  });
+}
+
+// Sync (without rebuilding) when the rule object hasn't changed shape.
+function syncRuleSelects(currentRule) {
+  const named = findNamedRule(currentRule);
+  const target = named ? named.notation : CUSTOM_VALUE;
+  let anyMissing = false;
+  for (const sel of ALL_RULE_SELECTS) {
+    if (![...sel.options].some(o => o.value === target)) { anyMissing = true; break; }
+  }
+  if (anyMissing) rebuildRuleSelects(currentRule);
+  else for (const sel of ALL_RULE_SELECTS) sel.value = target;
+}
+
+// Free-form notation input.
+$ruleText.addEventListener('input', () => {
+  const r = parseRule($ruleText.value);
+  if (!r || ruleAllowsBirthOfNothing(r)) {
+    $ruleText.classList.add('invalid');
+    return;
+  }
+  $ruleText.classList.remove('invalid');
+  settings.setRule(r);
+});
 
 // --- Conway-mode pattern detection ---
 function refreshHighlights() {
@@ -119,12 +248,18 @@ function loop(now) {
     stepAccumulator -= toStep;
     if (toStep > maxStepsPerFrame * 4) toStep = maxStepsPerFrame * 4;
     for (let i = 0; i < toStep; i++) {
-      life.step();
-      if (life.population === 0) { setPlaying(false); break; }
+      stepWorld();
+      // With entropy off the world can go empty and we should pause; with
+      // entropy on we keep running because new life will spawn next tick.
+      if (life.population === 0 && !settings.get().entropy.enabled) {
+        setPlaying(false);
+        break;
+      }
     }
     if (toStep > 0) {
       refreshHighlights();
       updateStats();
+      refreshStepBackButton();
       dirty = true;
     }
   }
@@ -144,23 +279,62 @@ function loop(now) {
 requestAnimationFrame((t) => { lastFrame = t; loop(t); });
 
 // --- Transport controls ---
+const $stepBack = document.getElementById('step-back');
+
+function refreshStepBackButton() {
+  $stepBack.disabled = life.historySize === 0;
+}
+
+/**
+ * Advance one generation and apply entropy / cull effects.
+ * Centralizes the "what happens on a step" logic so play loop and manual step
+ * stay in sync.
+ */
+function stepWorld() {
+  life.step();
+  const e = settings.get().entropy;
+  // Cull and entropy gate independently. Either may be on without the other.
+  const wantEntropy = e.enabled && e.rate > 0;
+  if (wantEntropy || e.cull) {
+    const bounds = renderer.viewportBounds();
+    if (wantEntropy) entropy.tick(life, bounds, { rate: e.rate });
+    if (e.cull)      life.cull(bounds);
+  }
+}
+
 $play.addEventListener('click', () => setPlaying(!playing));
 $step.addEventListener('click', () => {
   if (playing) setPlaying(false);
-  life.step();
+  stepWorld();
   refreshHighlights();
   updateStats();
+  refreshStepBackButton();
   dirty = true;
+});
+$stepBack.addEventListener('click', () => {
+  if (playing) setPlaying(false);
+  if (life.stepBack()) {
+    refreshHighlights();
+    updateStats();
+    refreshStepBackButton();
+    dirty = true;
+  }
 });
 $reset.addEventListener('click', () => {
   setPlaying(false);
-  if (life.reset()) { refreshHighlights(); updateStats(); dirty = true; }
+  if (life.reset()) {
+    refreshHighlights();
+    updateStats();
+    refreshStepBackButton();
+    dirty = true;
+  }
 });
 $clear.addEventListener('click', () => {
   setPlaying(false);
   life.clear();
   refreshHighlights();
   updateStats();
+  refreshStepBackButton();
   dirty = true;
 });
 $center.addEventListener('click', () => {
@@ -171,19 +345,30 @@ $center.addEventListener('click', () => {
 $preset.addEventListener('change', () => {
   const id = $preset.value;
   if (!id) return;
+  if (id === '__import__') {
+    $preset.value = '';
+    openImport();
+    return;
+  }
   const p = getPreset(id);
   if (!p) return;
+  loadCells(p.cells);
+});
+
+function loadCells(cells) {
+  if (!cells || cells.length === 0) return;
   setPlaying(false);
-  const xs = p.cells.map(c => c[0]);
-  const ys = p.cells.map(c => c[1]);
+  const xs = cells.map(c => c[0]);
+  const ys = cells.map(c => c[1]);
   const cx = Math.round((Math.min(...xs) + Math.max(...xs)) / 2);
   const cy = Math.round((Math.min(...ys) + Math.max(...ys)) / 2);
-  life.load(p.cells, -cx, -cy);
+  life.load(cells, -cx, -cy);
   renderer.fitTo(life.bounds(), 0.25);
   refreshHighlights();
   updateStats();
+  refreshStepBackButton();
   dirty = true;
-});
+}
 
 // ============================================================================
 //  Pointer / wheel input — driven by user bindings.
@@ -320,24 +505,51 @@ document.addEventListener('fullscreenchange', () => {
 });
 
 let zen = false;
+const HISTORY_MAX = 256;
 function setZen(on) {
   zen = !!on;
   document.body.classList.toggle('zen', zen);
+  // Zen mode is "screensaver" mode — pure forward propagation. Disable history
+  // snapshotting entirely so the step loop has zero per-step bookkeeping cost,
+  // and free the buffer that's already been collected.
+  if (zen) {
+    life.historyMax = 0;
+    life.clearHistory();
+    refreshStepBackButton();
+  } else {
+    life.historyMax = HISTORY_MAX;
+    refreshStepBackButton();
+  }
 }
 
 // --- Keyboard ---
 window.addEventListener('keydown', (e) => {
-  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  const tag = e.target.tagName;
+  if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') {
+    // Inside text fields, only honor a couple of high-value shortcuts.
+    if (e.key === 'Escape') {
+      if (!$importModal.hidden)   { closeImport();   e.target.blur(); return; }
+      if (!$settingsModal.hidden) { closeSettings(); e.target.blur(); return; }
+    }
+    if ((e.metaKey || e.ctrlKey) && e.key === 'Enter' && !$importModal.hidden) {
+      e.preventDefault();
+      $rleLoad.click();
+    }
+    return;
+  }
   if (e.key === 'Escape') {
     // Browser handles ESC for fullscreen on its own. Use ESC to close modal or
     // exit zen, in that priority order.
-    if ($settingsModal && !$settingsModal.hidden) { closeSettings(); return; }
+    if (!$importModal.hidden)   { closeImport();   return; }
+    if (!$settingsModal.hidden) { closeSettings(); return; }
     if (zen) { setZen(false); return; }
   }
   switch (e.key) {
     case ' ': e.preventDefault(); setPlaying(!playing); break;
     case 'ArrowRight':
     case 'n': $step.click(); break;
+    case 'ArrowLeft':
+    case 'p': $stepBack.click(); break;
     case 'r': $reset.click(); break;
     case 'c': $clear.click(); break;
     case 'f': $center.click(); break;
@@ -388,6 +600,19 @@ $conwayMode.addEventListener('change', () => {
   settings.setConwayMode($conwayMode.checked);
 });
 
+// Entropy controls.
+$entropyEnabled.addEventListener('change', () => {
+  settings.setEntropy({ enabled: $entropyEnabled.checked });
+});
+$entropyRate.addEventListener('input', () => {
+  settings.setEntropy({ rate: +$entropyRate.value });
+});
+$entropyCull.addEventListener('change', () => {
+  settings.setEntropy({ cull: $entropyCull.checked });
+});
+
+function fmtEntropyRate(r) { return r.toFixed(1); }
+
 // Build binding select dropdowns once.
 for (const sel of $settingsModal.querySelectorAll('select[data-bind]')) {
   const cmd = sel.dataset.bind;
@@ -399,27 +624,94 @@ for (const sel of $settingsModal.querySelectorAll('select[data-bind]')) {
   sel.addEventListener('change', () => settings.setBinding(cmd, sel.value));
 }
 
+// ============================================================================
+//  RLE import
+// ============================================================================
+
+function openImport() {
+  $importModal.hidden = false;
+  $rleStatus.textContent = '';
+  $rleStatus.className = 'rle-status';
+  setTimeout(() => $rleInput.focus(), 0);
+}
+function closeImport() {
+  $importModal.hidden = true;
+}
+
+$importModal.addEventListener('click', (e) => {
+  if (e.target.closest('[data-close]')) closeImport();
+});
+
+$rleInput.addEventListener('input', () => {
+  $rleStatus.textContent = '';
+  $rleStatus.className = 'rle-status';
+});
+
+$rleLoad.addEventListener('click', () => {
+  const result = parseRLE($rleInput.value);
+  if (result.error) {
+    flashStatus($rleStatus, result.error, 'error');
+    return;
+  }
+  if (!result.cells.length) {
+    flashStatus($rleStatus, 'Pattern parsed but contained no live cells.', 'error');
+    return;
+  }
+  // If the file declared a rule, switch to it.
+  if (result.rule) settings.setRule(result.rule);
+
+  loadCells(result.cells);
+  closeImport();
+});
+
+function flashStatus(el, msg, kind) {
+  el.textContent = msg;
+  el.className = `rle-status ${kind || ''}`;
+}
+
 function syncSettingsUI() {
   const s = settings.get();
   $conwayMode.checked = s.conwayMode;
+  $entropyEnabled.checked = s.entropy.enabled;
+  $entropyRate.value      = s.entropy.rate;
+  $entropyRateVal.textContent = fmtEntropyRate(s.entropy.rate);
+  $entropyRate.style.setProperty('--pct', `${(s.entropy.rate / 5) * 100}%`);
+  $entropyCull.checked    = s.entropy.cull;
   for (const sel of $settingsModal.querySelectorAll('select[data-bind]')) {
     sel.value = s.bindings[sel.dataset.bind];
   }
 }
 
 // React to settings changes from anywhere (modal, reset, programmatic).
-settings.subscribe(() => {
+settings.subscribe((s) => {
   syncSettingsUI();
   updateHint();
+  // Apply the rule to the simulation. Step calls will use the new rule from
+  // the very next tick — no recompute needed.
+  const r = parseRule(s.rule) || parseRule('B3/S23');
+  life.setRule(r);
+  syncRuleSelects(r);
+  syncRuleEditor(r);
+  // Conway-mode body class drives the zen-mode wordmark overlay.
+  document.body.classList.toggle('conway-mode', !!s.conwayMode);
   refreshHighlights();
   dirty = true;
 });
 
 // --- Initial state ---
+{
+  const s = settings.get();
+  const r = parseRule(s.rule) || parseRule('B3/S23');
+  life.setRule(r);
+  rebuildRuleSelects(r);
+  syncRuleEditor(r);
+  document.body.classList.toggle('conway-mode', !!s.conwayMode);
+}
 updateHint();
 const intro = getPreset('glider');
 life.load(intro.cells, -1, -1);
 renderer.fitTo(life.bounds(), 0.45);
 refreshHighlights();
 updateStats();
+refreshStepBackButton();
 dirty = true;

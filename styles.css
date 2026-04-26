@@ -125,9 +125,10 @@ body::before {
   transform: translateY(-65%) rotate(45deg);
   pointer-events: none;
 }
-select#preset {
+.select-wrap select {
   appearance: none;
   -webkit-appearance: none;
+  -moz-appearance: none;
   background: rgba(10, 8, 22, 0.6);
   color: var(--text);
   border: 1px solid var(--border);
@@ -139,9 +140,10 @@ select#preset {
   min-width: 160px;
   transition: border-color 120ms ease, background 120ms ease;
 }
-select#preset:hover { border-color: var(--border-strong); }
-select#preset:focus { border-color: var(--accent); }
-select#preset option { background: var(--bg-2); color: var(--text); }
+.select-wrap select::-ms-expand { display: none; }
+.select-wrap select:hover { border-color: var(--border-strong); }
+.select-wrap select:focus { border-color: var(--accent); }
+.select-wrap select option { background: var(--bg-2); color: var(--text); }
 
 .stats { gap: 16px; }
 .stat { display: flex; flex-direction: column; align-items: flex-end; line-height: 1.1; }
@@ -220,8 +222,39 @@ body.zen .hud {
   transform: translateY(4px);
 }
 body.zen .hud-bc { transform: translate(-50%, 4px); }
+body.zen, body.zen #stage { cursor: none; }
 .hud {
   transition: opacity 220ms ease, transform 220ms ease;
+}
+
+/* Conway-mode + zen-mode easter egg: the Conway wordmark fades in faintly. */
+.zen-conway-logo {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(16px, 2.4vw, 32px);
+  pointer-events: none;
+  z-index: 5;
+  opacity: 0;
+  transition: opacity 800ms ease 200ms;
+}
+.zen-conway-logo img {
+  display: block;
+  width: auto;
+  /* Invert the dark-on-transparent PNGs to bright white, then push pure white
+   * with brightness so anti-aliased edges don't look grey. The drop-shadow
+   * adds a soft purple halo so the wordmark reads against the canvas without
+   * needing high opacity. */
+  filter: invert(1) brightness(1.4)
+          drop-shadow(0 0 12px rgba(167, 139, 250, 0.45))
+          drop-shadow(0 0 32px rgba(99, 102, 241, 0.25));
+}
+.zen-conway-logo .conway-icon { height: clamp(48px, 8.5vh, 104px); }
+.zen-conway-logo .conway-text { height: clamp(58px, 10.5vh, 128px); }
+body.zen.conway-mode .zen-conway-logo {
+  opacity: 0.32;
 }
 body.zen .zen-hint {
   opacity: 0.55;
@@ -497,6 +530,142 @@ input[type="range"]::-moz-range-thumb {
   box-shadow: 0 0 12px var(--accent-glow), 0 1px 3px rgba(0,0,0,0.4);
 }
 .switch input:focus-visible + .track { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* Rule editor */
+.rule-editor {
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(10, 8, 22, 0.45);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.rule-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.rule-lbl {
+  font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--text-faint);
+  width: 22px;
+  flex: 0 0 auto;
+}
+.digit-buttons {
+  display: flex;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.digit-btn {
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: rgba(10, 8, 22, 0.5);
+  color: var(--text-faint);
+  font: inherit;
+  font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, color 120ms ease, transform 80ms ease;
+}
+.digit-btn:hover { border-color: var(--border-strong); color: var(--text); }
+.digit-btn:active { transform: translateY(1px); }
+.digit-btn.on {
+  background: linear-gradient(180deg, var(--accent), var(--accent-2));
+  border-color: var(--accent);
+  color: #fff;
+  box-shadow: 0 0 12px var(--accent-glow);
+}
+.digit-btn.disabled { opacity: 0.35; cursor: not-allowed; }
+
+.notation-row input {
+  flex: 1;
+  background: rgba(10, 8, 22, 0.7);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font: inherit;
+  font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  font-size: 12px;
+  outline: none;
+}
+.notation-row input:hover { border-color: var(--border-strong); }
+.notation-row input:focus { border-color: var(--accent); }
+.notation-row input.invalid { border-color: #f87171; }
+
+/* RLE import dialog */
+#rle-input {
+  width: 100%;
+  min-height: 160px;
+  background: rgba(10, 8, 22, 0.7);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+  outline: none;
+  margin-top: 8px;
+}
+#rle-input::placeholder { color: var(--text-faint); }
+#rle-input:focus { border-color: var(--accent); }
+.rle-status {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-faint);
+  min-height: 18px;
+}
+.rle-status.error { color: #fca5a5; }
+.rle-status.ok    { color: #86efac; }
+.modal-foot .foot-actions { display: flex; gap: 8px; }
+.modal-foot-spacer { flex: 1; }
+.btn.primary {
+  background: linear-gradient(180deg, rgba(167, 139, 250, 0.28), rgba(99, 102, 241, 0.26));
+  border-color: var(--accent);
+  color: #fff;
+}
+.btn.primary:hover {
+  background: linear-gradient(180deg, rgba(167, 139, 250, 0.4), rgba(99, 102, 241, 0.36));
+}
+.section-desc code {
+  font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11px;
+  padding: 1px 5px;
+  background: rgba(139, 116, 240, 0.12);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text);
+}
+.section-desc a { color: var(--accent); text-decoration: none; }
+.section-desc a:hover { text-decoration: underline; }
+
+/* Entropy rate slider */
+.entropy-rate {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.entropy-rate input[type="range"] {
+  width: 130px;
+  background: linear-gradient(90deg, var(--accent) 0%, var(--accent) var(--pct, 20%), rgba(139, 116, 240, 0.18) var(--pct, 20%));
+}
+.entropy-rate .val {
+  font-variant-numeric: tabular-nums;
+  font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  color: var(--text-dim);
+  font-size: 11px;
+  min-width: 3ch;
+  text-align: right;
+}
 
 /* Easter-egg row: bare, dim, no section header. */
 .easter-row {

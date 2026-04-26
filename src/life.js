@@ -30,6 +30,20 @@ export class Life {
     this.cells = new Set();    // live cell keys
     this.generation = 0;
     this._snapshot = null;     // for reset()
+    // Bounded ring buffer of past generations (for step-back). Each entry is
+    // an Array<int> of cell keys — cheaper to store than Set, and rebuilding a
+    // Set from an array is fast.
+    this.historyMax = 256;
+    this._history = [];
+    // Default rule: Conway's B3/S23. Bitmasks: bit n means "applies with n
+    // live neighbors".
+    this.rule = { birth: 1 << 3, survive: (1 << 2) | (1 << 3) };
+  }
+
+  setRule(rule) {
+    if (rule && typeof rule.birth === 'number' && typeof rule.survive === 'number') {
+      this.rule = { birth: rule.birth, survive: rule.survive };
+    }
   }
 
   get population() { return this.cells.size; }
@@ -47,7 +61,11 @@ export class Life {
     this.cells.clear();
     this.generation = 0;
     this._snapshot = null;
+    this._history.length = 0;
   }
+
+  clearHistory() { this._history.length = 0; }
+  get historySize() { return this._history.length; }
 
   /**
    * Load a list of [x,y] coords, optionally offset. Records a snapshot for reset().
@@ -60,6 +78,7 @@ export class Life {
     }
     this.generation = 0;
     this._snapshot = new Set(this.cells);
+    this._history.length = 0;
   }
 
   snapshot() { this._snapshot = new Set(this.cells); }
@@ -68,15 +87,39 @@ export class Life {
     if (!this._snapshot) return false;
     this.cells = new Set(this._snapshot);
     this.generation = 0;
+    this._history.length = 0;
     return true;
   }
 
   /**
-   * Advance one generation. B3/S23.
+   * Pop the most recent saved generation off the history and restore it.
+   * Returns true if a step was undone.
+   */
+  stepBack() {
+    if (this._history.length === 0) return false;
+    const prev = this._history.pop();
+    this.cells = new Set(prev);
+    if (this.generation > 0) this.generation--;
+    return true;
+  }
+
+  /**
+   * Advance one generation using the configured rule (`this.rule`).
+   * Each cell's fate is decided in O(1) via two bitmask shifts.
    */
   step() {
     const live = this.cells;
+
+    // Snapshot the pre-step state so the user can step backward. Storing as
+    // an array (not a Set) makes the snapshot ~half the size and keeps
+    // playback fast — Array.from on a Set is one of V8's better-tuned paths.
+    if (this.historyMax > 0) {
+      this._history.push(Array.from(live));
+      if (this._history.length > this.historyMax) this._history.shift();
+    }
+
     const counts = new Map();
+    const { birth, survive } = this.rule;
 
     // For each live cell, increment all 8 neighbors.
     for (const k of live) {
@@ -97,10 +140,39 @@ export class Life {
 
     const next = new Set();
     for (const [k, n] of counts) {
-      if (n === 3 || (n === 2 && live.has(k))) next.add(k);
+      const alive = live.has(k);
+      const mask = alive ? survive : birth;
+      if ((mask >> n) & 1) next.add(k);
     }
+
+    // Edge case: if S0 is set, isolated live cells (no live neighbors at all)
+    // never make it into `counts` — handle them explicitly. Otherwise this
+    // branch is skipped entirely so most rules pay nothing.
+    if (survive & 1) {
+      for (const k of live) if (!counts.has(k)) next.add(k);
+    }
+
     this.cells = next;
     this.generation++;
+  }
+
+  /**
+   * Drop every live cell outside the inclusive [wx0,wy0,wx1,wy1] rectangle.
+   * Cheaper than building a Set then filtering — we replace the cell set in
+   * one pass, mirroring the pattern step() uses.
+   */
+  cull(bounds) {
+    if (!bounds) return;
+    const [wx0, wy0, wx1, wy1] = bounds;
+    const next = new Set();
+    for (const k of this.cells) {
+      const x = unpackX(k);
+      if (x < wx0 || x > wx1) continue;
+      const y = unpackY(k);
+      if (y < wy0 || y > wy1) continue;
+      next.add(k);
+    }
+    this.cells = next;
   }
 
   /**

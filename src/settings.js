@@ -1,10 +1,14 @@
 // Persistent user settings: input bindings + feature toggles.
 // All state is single-source-of-truth here; views subscribe to changes.
 
+import { parseRule, formatRule } from './rules.js';
+
 const STORAGE_KEY = 'conway.settings.v1';
 
 export const DEFAULTS = Object.freeze({
+  rule: 'B3/S23',
   conwayMode: false,
+  entropy: { enabled: false, rate: 1.0, cull: false },
   bindings: {
     toggle: 'click',
     pan:    'drag',
@@ -40,7 +44,9 @@ function load() {
     if (!raw) return clone(DEFAULTS);
     const parsed = JSON.parse(raw);
     return {
+      rule: sanitizeRule(parsed.rule),
       conwayMode: !!parsed.conwayMode,
+      entropy: sanitizeEntropy(parsed.entropy),
       bindings: {
         ...DEFAULTS.bindings,
         ...sanitizeBindings(parsed.bindings || {}),
@@ -49,6 +55,19 @@ function load() {
   } catch {
     return clone(DEFAULTS);
   }
+}
+
+function sanitizeEntropy(e) {
+  const def = DEFAULTS.entropy;
+  if (!e || typeof e !== 'object') return { ...def };
+  const rate = Number.isFinite(e.rate) ? Math.max(0, Math.min(5, e.rate)) : def.rate;
+  return { enabled: !!e.enabled, rate, cull: !!e.cull };
+}
+
+function sanitizeRule(s) {
+  if (!s) return DEFAULTS.rule;
+  const r = parseRule(s);
+  return r ? formatRule(r) : DEFAULTS.rule;
 }
 
 function sanitizeBindings(b) {
@@ -77,6 +96,25 @@ export function setConwayMode(on) {
   state.conwayMode = !!on;
   save();
   emit();
+}
+
+/** Patch any subset of entropy options. */
+export function setEntropy(partial) {
+  state.entropy = sanitizeEntropy({ ...state.entropy, ...partial });
+  save();
+  emit();
+}
+
+/** Persist a new rule. Accepts either a notation string or a parsed rule object. */
+export function setRule(notationOrRule) {
+  let rule;
+  if (typeof notationOrRule === 'string') rule = parseRule(notationOrRule);
+  else rule = notationOrRule;
+  if (!rule) return false;
+  state.rule = formatRule(rule);
+  save();
+  emit();
+  return true;
 }
 
 /**
