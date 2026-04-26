@@ -335,13 +335,16 @@ input[type="range"]::-moz-range-thumb {
   font-size: 11px;
   letter-spacing: 0.02em;
   pointer-events: none;
-  gap: 14px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
 }
 .hint .pair {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 6px;
 }
+.hint .pair kbd { min-width: 0; }
 .hint kbd {
   font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
   font-size: 10.5px;

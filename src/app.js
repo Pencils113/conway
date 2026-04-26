@@ -203,18 +203,20 @@ function refreshHighlights() {
   }
 }
 
-// --- Hint legend (reflects current bindings) ---
+// --- Hint legend (reflects current bindings + view-mode hotkeys) ---
 function updateHint() {
   const b = settings.get().bindings;
   const items = [
-    ['toggle', 'toggle'],
-    ['pan',    'pan'],
-    ['paint',  'paint'],
-    ['zoom',   'zoom'],
+    [b.toggle, 'toggle'],
+    [b.pan,    'pan'],
+    [b.paint,  'paint'],
+    [b.zoom,   'zoom'],
+    ['h',      'zen'],
+    ['f',      'fullscreen'],
   ];
   $hint.innerHTML = items
-    .map(([cmd, label]) =>
-      `<span class="pair"><kbd>${escapeHtml(b[cmd])}</kbd><span class="arr">→</span><span class="act">${label}</span></span>`)
+    .map(([k, label]) =>
+      `<div class="pair"><kbd>${escapeHtml(k)}</kbd><span class="arr">→</span><span class="act">${label}</span></div>`)
     .join('');
 }
 function escapeHtml(s) {
@@ -552,8 +554,9 @@ window.addEventListener('keydown', (e) => {
     case 'p': $stepBack.click(); break;
     case 'r': $reset.click(); break;
     case 'c': $clear.click(); break;
-    case 'f': $center.click(); break;
+    case '0': $center.click(); break;
     case 's': openSettings(); break;
+    case 'f': toggleFullscreen(); break;
     case 'h': setZen(!zen); break;
     case '+': case '=': renderer.zoomAt(window.innerWidth/2, window.innerHeight/2, 1.2); dirty = true; break;
     case '-': case '_': renderer.zoomAt(window.innerWidth/2, window.innerHeight/2, 1/1.2); dirty = true; break;
