@@ -1,6 +1,8 @@
 import { Life } from './life.js';
 import { Renderer } from './renderer.js';
 import { PRESETS, getPreset } from './presets.js';
+import { findIsolatedTubCells } from './patterns.js';
+import * as settings from './settings.js';
 
 const canvas = document.getElementById('stage');
 const life = new Life();
@@ -18,6 +20,12 @@ const $center = document.getElementById('center');
 const $speed = document.getElementById('speed');
 const $speedVal = document.getElementById('speed-val');
 const $preset = document.getElementById('preset');
+const $hint   = document.getElementById('hint');
+const $settingsBtn   = document.getElementById('settings-btn');
+const $settingsModal = document.getElementById('settings-modal');
+const $settingsReset = document.getElementById('settings-reset');
+const $conwayMode    = document.getElementById('conway-mode');
+const $fullscreenBtn = document.getElementById('fullscreen-btn');
 
 // --- Populate presets ---
 for (const p of PRESETS) {
@@ -29,7 +37,6 @@ for (const p of PRESETS) {
 
 // --- Speed: log scale 0.5 .. 200 steps/sec ---
 function speedFromSlider(v) {
-  // v: 0..100 -> sps: 0.5..200 logarithmic
   const t = v / 100;
   const lo = Math.log(0.5);
   const hi = Math.log(200);
@@ -58,6 +65,33 @@ function updateStats() {
   $pop.textContent = life.population.toLocaleString();
 }
 
+// --- Conway-mode pattern detection ---
+function refreshHighlights() {
+  if (settings.get().conwayMode) {
+    renderer.highlights = findIsolatedTubCells(life);
+  } else if (renderer.highlights.size) {
+    renderer.highlights = new Set();
+  }
+}
+
+// --- Hint legend (reflects current bindings) ---
+function updateHint() {
+  const b = settings.get().bindings;
+  const items = [
+    ['toggle', 'toggle'],
+    ['pan',    'pan'],
+    ['paint',  'paint'],
+    ['zoom',   'zoom'],
+  ];
+  $hint.innerHTML = items
+    .map(([cmd, label]) =>
+      `<span class="pair"><kbd>${escapeHtml(b[cmd])}</kbd><span class="arr">→</span><span class="act">${label}</span></span>`)
+    .join('');
+}
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
 // --- Playback ---
 let playing = false;
 let lastFrame = 0;
@@ -75,21 +109,24 @@ function setPlaying(p) {
 }
 
 function loop(now) {
-  const dt = Math.min(0.25, (now - lastFrame) / 1000); // clamp at 250ms to avoid huge catch-up jumps
+  const dt = Math.min(0.25, (now - lastFrame) / 1000);
   lastFrame = now;
 
   if (playing) {
     stepAccumulator += dt * stepsPerSecond;
-    // Cap how many steps per frame to keep UI responsive.
     const maxStepsPerFrame = stepsPerSecond > 60 ? Math.ceil(stepsPerSecond / 30) : 1;
     let toStep = Math.floor(stepAccumulator);
     stepAccumulator -= toStep;
-    if (toStep > maxStepsPerFrame * 4) toStep = maxStepsPerFrame * 4; // hard cap
+    if (toStep > maxStepsPerFrame * 4) toStep = maxStepsPerFrame * 4;
     for (let i = 0; i < toStep; i++) {
       life.step();
       if (life.population === 0) { setPlaying(false); break; }
     }
-    if (toStep > 0) { dirty = true; updateStats(); }
+    if (toStep > 0) {
+      refreshHighlights();
+      updateStats();
+      dirty = true;
+    }
   }
 
   if (dirty) {
@@ -106,21 +143,23 @@ function loop(now) {
 }
 requestAnimationFrame((t) => { lastFrame = t; loop(t); });
 
-// --- Controls ---
+// --- Transport controls ---
 $play.addEventListener('click', () => setPlaying(!playing));
 $step.addEventListener('click', () => {
   if (playing) setPlaying(false);
   life.step();
+  refreshHighlights();
   updateStats();
   dirty = true;
 });
 $reset.addEventListener('click', () => {
   setPlaying(false);
-  if (life.reset()) { updateStats(); dirty = true; }
+  if (life.reset()) { refreshHighlights(); updateStats(); dirty = true; }
 });
 $clear.addEventListener('click', () => {
   setPlaying(false);
   life.clear();
+  refreshHighlights();
   updateStats();
   dirty = true;
 });
@@ -135,22 +174,33 @@ $preset.addEventListener('change', () => {
   const p = getPreset(id);
   if (!p) return;
   setPlaying(false);
-  // Center the pattern at world origin.
   const xs = p.cells.map(c => c[0]);
   const ys = p.cells.map(c => c[1]);
   const cx = Math.round((Math.min(...xs) + Math.max(...xs)) / 2);
   const cy = Math.round((Math.min(...ys) + Math.max(...ys)) / 2);
   life.load(p.cells, -cx, -cy);
   renderer.fitTo(life.bounds(), 0.25);
+  refreshHighlights();
   updateStats();
   dirty = true;
 });
 
-// --- Mouse: pan, zoom, paint ---
+// ============================================================================
+//  Pointer / wheel input — driven by user bindings.
+//  See settings.js for the binding model. We wait for movement to disambiguate
+//  click from drag; modifiers/buttons at the time of pointerdown determine the
+//  drag input string ("drag", "shift+drag", "right-drag", etc).
+// ============================================================================
+
+const DRAG_THRESHOLD_PX = 4;
+
 let pointerDown = false;
-let panMode = false;
-let paintMode = null; // 'add' | 'remove' | null
-let lastPanX = 0, lastPanY = 0;
+let downSnap = null;            // {button, shiftKey, altKey, ctrlKey, metaKey}
+let downX = 0, downY = 0;
+let lastX = 0, lastY = 0;
+let movedPastThreshold = false;
+let gesture = null;             // 'pan' | 'paint' | null
+let paintAdd = true;
 let lastPaintX = null, lastPaintY = null;
 
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
@@ -158,75 +208,132 @@ canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 canvas.addEventListener('pointerdown', (e) => {
   canvas.setPointerCapture(e.pointerId);
   pointerDown = true;
-  lastPanX = e.clientX;
-  lastPanY = e.clientY;
-
-  // Middle-click or space-drag = pan; left = toggle/paint; shift = continuous paint
-  if (e.button === 1 || e.button === 2 || e.altKey) {
-    panMode = true;
-    canvas.classList.add('panning');
-    return;
-  }
-  panMode = false;
-  const [wx, wy] = renderer.screenToWorld(e.clientX, e.clientY);
-  if (e.shiftKey) {
-    paintMode = life.has(wx, wy) ? 'remove' : 'add';
-    if (paintMode === 'add') life.add(wx, wy); else life.remove(wx, wy);
-  } else {
-    life.toggle(wx, wy);
-    paintMode = null; // single toggle, will not paint on move unless shift
-  }
-  lastPaintX = wx; lastPaintY = wy;
-  canvas.classList.add('painting');
-  updateStats();
-  dirty = true;
+  downSnap = {
+    button: e.button,
+    shiftKey: e.shiftKey,
+    altKey: e.altKey,
+    ctrlKey: e.ctrlKey,
+    metaKey: e.metaKey,
+  };
+  downX = lastX = e.clientX;
+  downY = lastY = e.clientY;
+  movedPastThreshold = false;
+  gesture = null;
 });
 
 canvas.addEventListener('pointermove', (e) => {
   if (!pointerDown) return;
-  if (panMode) {
-    const dx = e.clientX - lastPanX;
-    const dy = e.clientY - lastPanY;
-    lastPanX = e.clientX;
-    lastPanY = e.clientY;
-    renderer.pan(dx, dy);
-    dirty = true;
-    return;
+
+  if (!movedPastThreshold) {
+    const dx0 = e.clientX - downX, dy0 = e.clientY - downY;
+    if (dx0 * dx0 + dy0 * dy0 < DRAG_THRESHOLD_PX * DRAG_THRESHOLD_PX) {
+      lastX = e.clientX; lastY = e.clientY;
+      return;
+    }
+    movedPastThreshold = true;
+
+    const input = settings.dragInput(downSnap);
+    const cmd = settings.commandForInput(input);
+    if (cmd === 'pan') {
+      gesture = 'pan';
+      canvas.classList.add('panning');
+    } else if (cmd === 'paint') {
+      gesture = 'paint';
+      const [wx, wy] = renderer.screenToWorld(downX, downY);
+      paintAdd = !life.has(wx, wy);
+      if (paintAdd) life.add(wx, wy); else life.remove(wx, wy);
+      lastPaintX = wx; lastPaintY = wy;
+      canvas.classList.add('painting');
+      refreshHighlights();
+      updateStats();
+      dirty = true;
+    }
   }
 
-  if (paintMode) {
-    // Bresenham-ish line between last and current to avoid gaps when moving fast.
-    const [wx, wy] = renderer.screenToWorld(e.clientX, e.clientY);
-    if (wx === lastPaintX && wy === lastPaintY) return;
-    plotLine(lastPaintX, lastPaintY, wx, wy, (x, y) => {
-      if (paintMode === 'add') life.add(x, y);
-      else life.remove(x, y);
-    });
-    lastPaintX = wx; lastPaintY = wy;
-    updateStats();
+  if (gesture === 'pan') {
+    renderer.pan(e.clientX - lastX, e.clientY - lastY);
     dirty = true;
+  } else if (gesture === 'paint') {
+    const [wx, wy] = renderer.screenToWorld(e.clientX, e.clientY);
+    if (wx !== lastPaintX || wy !== lastPaintY) {
+      plotLine(lastPaintX, lastPaintY, wx, wy, (x, y) => {
+        if (paintAdd) life.add(x, y); else life.remove(x, y);
+      });
+      lastPaintX = wx; lastPaintY = wy;
+      refreshHighlights();
+      updateStats();
+      dirty = true;
+    }
   }
+
+  lastX = e.clientX;
+  lastY = e.clientY;
 });
 
 canvas.addEventListener('pointerup', (e) => {
+  if (!pointerDown) return;
   pointerDown = false;
-  panMode = false;
-  paintMode = null;
+
+  if (!movedPastThreshold && gesture === null) {
+    const input = settings.clickInput(downSnap);
+    if (settings.commandForInput(input) === 'toggle') {
+      const [wx, wy] = renderer.screenToWorld(e.clientX, e.clientY);
+      life.toggle(wx, wy);
+      refreshHighlights();
+      updateStats();
+      dirty = true;
+    }
+  }
+
+  gesture = null;
+  canvas.classList.remove('panning', 'painting');
+});
+
+canvas.addEventListener('pointercancel', () => {
+  pointerDown = false;
+  gesture = null;
   canvas.classList.remove('panning', 'painting');
 });
 
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();
-  const factor = Math.exp(-e.deltaY * 0.0015);
-  renderer.zoomAt(e.clientX, e.clientY, factor);
-  dirty = true;
+  const input = settings.wheelInput(e);
+  if (settings.commandForInput(input) === 'zoom') {
+    const factor = Math.exp(-e.deltaY * 0.0015);
+    renderer.zoomAt(e.clientX, e.clientY, factor);
+    dirty = true;
+  }
 }, { passive: false });
 
-// Pan with drag of any other element on body? — handled within canvas only.
+// --- Fullscreen + zen mode ---
+
+function toggleFullscreen() {
+  if (document.fullscreenElement) {
+    document.exitFullscreen?.();
+  } else {
+    document.documentElement.requestFullscreen?.().catch(() => {});
+  }
+}
+$fullscreenBtn.addEventListener('click', toggleFullscreen);
+document.addEventListener('fullscreenchange', () => {
+  document.body.classList.toggle('fullscreen', !!document.fullscreenElement);
+});
+
+let zen = false;
+function setZen(on) {
+  zen = !!on;
+  document.body.classList.toggle('zen', zen);
+}
 
 // --- Keyboard ---
 window.addEventListener('keydown', (e) => {
   if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+  if (e.key === 'Escape') {
+    // Browser handles ESC for fullscreen on its own. Use ESC to close modal or
+    // exit zen, in that priority order.
+    if ($settingsModal && !$settingsModal.hidden) { closeSettings(); return; }
+    if (zen) { setZen(false); return; }
+  }
   switch (e.key) {
     case ' ': e.preventDefault(); setPlaying(!playing); break;
     case 'ArrowRight':
@@ -234,6 +341,8 @@ window.addEventListener('keydown', (e) => {
     case 'r': $reset.click(); break;
     case 'c': $clear.click(); break;
     case 'f': $center.click(); break;
+    case 's': openSettings(); break;
+    case 'h': setZen(!zen); break;
     case '+': case '=': renderer.zoomAt(window.innerWidth/2, window.innerHeight/2, 1.2); dirty = true; break;
     case '-': case '_': renderer.zoomAt(window.innerWidth/2, window.innerHeight/2, 1/1.2); dirty = true; break;
   }
@@ -257,9 +366,60 @@ function plotLine(x0, y0, x1, y1, plot) {
   }
 }
 
-// --- Initial state: drop in a glider so it's not boringly empty ---
+// ============================================================================
+//  Settings modal
+// ============================================================================
+
+function openSettings() {
+  $settingsModal.hidden = false;
+  syncSettingsUI();
+}
+function closeSettings() {
+  $settingsModal.hidden = true;
+}
+
+$settingsBtn.addEventListener('click', openSettings);
+$settingsModal.addEventListener('click', (e) => {
+  if (e.target.closest('[data-close]')) closeSettings();
+});
+$settingsReset.addEventListener('click', () => settings.reset());
+
+$conwayMode.addEventListener('change', () => {
+  settings.setConwayMode($conwayMode.checked);
+});
+
+// Build binding select dropdowns once.
+for (const sel of $settingsModal.querySelectorAll('select[data-bind]')) {
+  const cmd = sel.dataset.bind;
+  for (const opt of settings.OPTIONS[cmd]) {
+    const o = document.createElement('option');
+    o.value = opt; o.textContent = opt;
+    sel.appendChild(o);
+  }
+  sel.addEventListener('change', () => settings.setBinding(cmd, sel.value));
+}
+
+function syncSettingsUI() {
+  const s = settings.get();
+  $conwayMode.checked = s.conwayMode;
+  for (const sel of $settingsModal.querySelectorAll('select[data-bind]')) {
+    sel.value = s.bindings[sel.dataset.bind];
+  }
+}
+
+// React to settings changes from anywhere (modal, reset, programmatic).
+settings.subscribe(() => {
+  syncSettingsUI();
+  updateHint();
+  refreshHighlights();
+  dirty = true;
+});
+
+// --- Initial state ---
+updateHint();
 const intro = getPreset('glider');
 life.load(intro.cells, -1, -1);
 renderer.fitTo(life.bounds(), 0.45);
+refreshHighlights();
 updateStats();
 dirty = true;

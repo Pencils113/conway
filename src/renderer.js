@@ -31,6 +31,12 @@ export class Renderer {
     this.gridMajor = 'rgba(139, 116, 240, 0.14)';
     this.cellFill = '#c4b5fd';
     this.cellGlow = 'rgba(167, 139, 250, 0.55)';
+    // Highlight color (used by Conway-mode for isolated tubs).
+    this.highlightFill = '#fbbf24';
+    this.highlightGlow = 'rgba(251, 191, 36, 0.65)';
+    this.highlightRGB  = [0xfb, 0xbf, 0x24];
+    // Set<packedKey> of cells to render with the highlight palette.
+    this.highlights = new Set();
 
     this._imgData = null;
 
@@ -149,33 +155,34 @@ export class Renderer {
   _drawCellsRect(wx0, wy0, wx1, wy1) {
     const { ctx, zoom, tx, ty, life } = this;
     const cells = life.cells;
-    const size = zoom;
-    // Slight inset to give the cells a clean, modern feel; rounded edges via shadow at high zoom.
     const inset = zoom > 10 ? 1 : 0;
-    const drawSize = Math.max(1, size - inset);
+    const drawSize = Math.max(1, zoom - inset);
 
-    // Glow underlay for high zoom only — keep cheap when many cells.
-    const useGlow = zoom >= 10 && cells.size < 4000;
+    // Two-pass draw: ordinary cells, then highlighted cells overpainted with a
+    // distinct color and a softer glow. Splitting passes lets us flip
+    // fillStyle/shadow once each rather than per-cell.
+    const drawPass = (set, fill, glow, glowEnabled) => {
+      ctx.fillStyle = fill;
+      const useGlow = glowEnabled && zoom >= 10 && set.size < 4000;
+      if (useGlow) {
+        ctx.save();
+        ctx.shadowColor = glow;
+        ctx.shadowBlur = Math.min(16, zoom * 0.7);
+      }
+      for (const k of set) {
+        const cx = unpackX(k);
+        if (cx < wx0 || cx > wx1) continue;
+        const cy = unpackY(k);
+        if (cy < wy0 || cy > wy1) continue;
+        ctx.fillRect(cx * zoom + tx, cy * zoom + ty, drawSize, drawSize);
+      }
+      if (useGlow) ctx.restore();
+    };
 
-    ctx.fillStyle = this.cellFill;
-
-    if (useGlow) {
-      ctx.save();
-      ctx.shadowColor = this.cellGlow;
-      ctx.shadowBlur = Math.min(14, zoom * 0.6);
+    drawPass(cells, this.cellFill, this.cellGlow, true);
+    if (this.highlights.size > 0) {
+      drawPass(this.highlights, this.highlightFill, this.highlightGlow, true);
     }
-
-    for (const k of cells) {
-      const cx = unpackX(k);
-      if (cx < wx0 || cx > wx1) continue;
-      const cy = unpackY(k);
-      if (cy < wy0 || cy > wy1) continue;
-      const px = cx * zoom + tx;
-      const py = cy * zoom + ty;
-      ctx.fillRect(px, py, drawSize, drawSize);
-    }
-
-    if (useGlow) ctx.restore();
   }
 
   _drawCellsPixels(wx0, wy0, wx1, wy1) {
@@ -201,29 +208,36 @@ export class Renderer {
     const pxSize = Math.max(1, Math.round(zoom * this.dpr));
     const dpr = this.dpr;
 
-    for (const k of life.cells) {
-      const cx = (k >>> 16) & 0xFFFF;
-      const cxs = cx & 0x8000 ? cx - 0x10000 : cx;
-      if (cxs < wx0 || cxs > wx1) continue;
-      const cy = k & 0xFFFF;
-      const cys = cy & 0x8000 ? cy - 0x10000 : cy;
-      if (cys < wy0 || cys > wy1) continue;
+    const splat = (set, r, g, b) => {
+      for (const k of set) {
+        const cx = (k >>> 16) & 0xFFFF;
+        const cxs = cx & 0x8000 ? cx - 0x10000 : cx;
+        if (cxs < wx0 || cxs > wx1) continue;
+        const cy = k & 0xFFFF;
+        const cys = cy & 0x8000 ? cy - 0x10000 : cy;
+        if (cys < wy0 || cys > wy1) continue;
 
-      const sx = Math.round((cxs * zoom + tx) * dpr);
-      const sy = Math.round((cys * zoom + ty) * dpr);
+        const sx = Math.round((cxs * zoom + tx) * dpr);
+        const sy = Math.round((cys * zoom + ty) * dpr);
 
-      for (let dy = 0; dy < pxSize; dy++) {
-        const yy = sy + dy;
-        if (yy < 0 || yy >= H) continue;
-        let off = (yy * W + sx) * 4;
-        for (let dx = 0; dx < pxSize; dx++) {
-          const xx = sx + dx;
-          if (xx < 0 || xx >= W) { off += 4; continue; }
-          // c4b5fd
-          data[off] = 0xc4; data[off+1] = 0xb5; data[off+2] = 0xfd; data[off+3] = 255;
-          off += 4;
+        for (let dy2 = 0; dy2 < pxSize; dy2++) {
+          const yy = sy + dy2;
+          if (yy < 0 || yy >= H) continue;
+          let off = (yy * W + sx) * 4;
+          for (let dx2 = 0; dx2 < pxSize; dx2++) {
+            const xx = sx + dx2;
+            if (xx < 0 || xx >= W) { off += 4; continue; }
+            data[off] = r; data[off+1] = g; data[off+2] = b; data[off+3] = 255;
+            off += 4;
+          }
         }
       }
+    };
+
+    splat(life.cells, 0xc4, 0xb5, 0xfd);
+    if (this.highlights.size > 0) {
+      const [hr, hg, hb] = this.highlightRGB;
+      splat(this.highlights, hr, hg, hb);
     }
 
     // Reset transform so putImageData is in raw pixels.
