@@ -393,6 +393,13 @@ let lastPaintX = null, lastPaintY = null;
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
 canvas.addEventListener('pointerdown', (e) => {
+  // Zen mode is "look-don't-touch" — any click on the canvas dismisses it
+  // without triggering a cell toggle, pan, or paint. Wheel/keyboard still
+  // work, so you can zoom around freely while in zen.
+  if (zen) {
+    setZen(false);
+    return;
+  }
   canvas.setPointerCapture(e.pointerId);
   pointerDown = true;
   downSnap = {
@@ -523,6 +530,19 @@ function setZen(on) {
     refreshStepBackButton();
   }
 }
+
+// --- Side controls (zoom in/out, zen toggle) ---
+const $zoomIn  = document.getElementById('zoom-in');
+const $zoomOut = document.getElementById('zoom-out');
+const $zenBtn  = document.getElementById('zen-btn');
+
+function zoomViewportCenter(factor) {
+  renderer.zoomAt(window.innerWidth / 2, window.innerHeight / 2, factor);
+  dirty = true;
+}
+$zoomIn.addEventListener('click',  () => zoomViewportCenter(1.2));
+$zoomOut.addEventListener('click', () => zoomViewportCenter(1 / 1.2));
+$zenBtn.addEventListener('click',  () => setZen(!zen));
 
 // --- Keyboard ---
 window.addEventListener('keydown', (e) => {

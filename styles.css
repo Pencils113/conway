@@ -215,6 +215,22 @@ body.playing .btn.play .ico-pause { display: inline; }
 body.fullscreen #fullscreen-btn .ico-fs-enter { display: none; }
 body.fullscreen #fullscreen-btn .ico-fs-exit  { display: inline; }
 
+/* Vertical side button strip (zoom in / out / zen). */
+.hud-mr {
+  top: 50%;
+  right: 16px;
+  transform: translateY(-50%);
+  flex-direction: column;
+  padding: 6px;
+  gap: 4px;
+}
+.side-controls .btn.icon {
+  width: 30px;
+  height: 30px;
+  color: var(--text-dim);
+}
+.side-controls .btn.icon:hover { color: var(--text); }
+
 /* Zen mode: hide all HUD chrome, leave just the canvas. */
 body.zen .hud {
   opacity: 0;
@@ -222,6 +238,7 @@ body.zen .hud {
   transform: translateY(4px);
 }
 body.zen .hud-bc { transform: translate(-50%, 4px); }
+body.zen .hud-mr { transform: translateY(calc(-50% + 4px)); }
 body.zen, body.zen #stage { cursor: none; }
 .hud {
   transition: opacity 220ms ease, transform 220ms ease;

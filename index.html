@@ -70,7 +70,22 @@
 
   <div id="hint" class="hud hud-bl hint"></div>
 
-  <div class="zen-hint"><kbd>h</kbd> show controls</div>
+  <aside class="hud hud-mr side-controls" aria-label="View controls">
+    <button id="zoom-in" class="btn icon" title="Zoom in (+)" aria-label="Zoom in">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 6v12M6 12h12"/></svg>
+    </button>
+    <button id="zoom-out" class="btn icon" title="Zoom out (-)" aria-label="Zoom out">
+      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 12h12"/></svg>
+    </button>
+    <button id="zen-btn" class="btn icon" title="Zen mode (h)" aria-label="Zen mode">
+      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/>
+        <circle cx="12" cy="12" r="2.5"/>
+      </svg>
+    </button>
+  </aside>
+
+  <div class="zen-hint"><kbd>h</kbd> or click anywhere to exit</div>
 
   <div class="zen-conway-logo" aria-hidden="true">
     <img class="conway-icon" src="Conway-Icon.png" alt="" />
