@@ -123,6 +123,20 @@
         </section>
 
         <section class="settings-section">
+          <h3>World</h3>
+          <label class="row">
+            <span class="row-label">
+              <span class="row-title">Cull off-screen cells</span>
+              <span class="row-desc">Cells that drift outside the viewport die. Keeps step time bounded by what you can see; turn off to let patterns roam the infinite plane.</span>
+            </span>
+            <span class="switch">
+              <input type="checkbox" id="cull-enabled" />
+              <span class="track" aria-hidden="true"></span>
+            </span>
+          </label>
+        </section>
+
+        <section class="settings-section">
           <h3>Entropy</h3>
           <p class="section-desc">Sprinkle small bursts of life inside the visible viewport. Helps stuck patterns get unstuck — handy for screensaver use.</p>
           <label class="row">
@@ -146,14 +160,18 @@
           </div>
           <label class="row">
             <span class="row-label">
-              <span class="row-title">Cull off-screen</span>
-              <span class="row-desc">Cells that drift outside the viewport die.</span>
+              <span class="row-title">Population cap</span>
+              <span class="row-desc">Stop spawning new life once total population reaches the threshold. Existing patterns can still grow past it through normal evolution — the cap only gates entropy births.</span>
             </span>
             <span class="switch">
-              <input type="checkbox" id="entropy-cull" />
+              <input type="checkbox" id="entropy-maxpop-enabled" />
               <span class="track" aria-hidden="true"></span>
             </span>
           </label>
+          <div class="row binding maxpop-row">
+            <span class="row-title">Threshold</span>
+            <input id="entropy-maxpop" type="number" min="10" max="100000" step="50" />
+          </div>
         </section>
 
         <section class="settings-section">

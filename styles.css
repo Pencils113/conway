@@ -504,6 +504,31 @@ input[type="range"]::-moz-range-thumb {
 .row.binding select:focus { border-color: var(--accent); }
 .row.binding select option { background: var(--bg-2); color: var(--text); }
 
+.row.binding input[type="number"] {
+  appearance: textfield;
+  -moz-appearance: textfield;
+  background: rgba(10, 8, 22, 0.7);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font: inherit;
+  font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  font-size: 12px;
+  width: 110px;
+  text-align: right;
+  outline: none;
+  font-variant-numeric: tabular-nums;
+}
+.row.binding input[type="number"]:hover { border-color: var(--border-strong); }
+.row.binding input[type="number"]:focus { border-color: var(--accent); }
+.row.binding input[type="number"]:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.maxpop-row.disabled { opacity: 0.55; }
+.maxpop-row.disabled .row-title { color: var(--text-faint); }
+
 /* iOS-style switch */
 .switch {
   position: relative;

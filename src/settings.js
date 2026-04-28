@@ -8,7 +8,17 @@ const STORAGE_KEY = 'conway.settings.v1';
 export const DEFAULTS = Object.freeze({
   rule: 'B3/S23',
   conwayMode: false,
-  entropy: { enabled: false, rate: 1.0, cull: false },
+  // Off-screen culling lives at the top level; it's a perf knob that affects
+  // every step regardless of whether entropy is on.
+  cull: true,
+  entropy: {
+    enabled: false,
+    rate: 1.0,
+    // Hard cap on entropy births. The population can still exceed this through
+    // normal evolution — entropy just stops adding cells once we're at/above it.
+    maxPopEnabled: false,
+    maxPop: 500,
+  },
   bindings: {
     toggle: 'click',
     pan:    'drag',
@@ -43,9 +53,14 @@ function load() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return clone(DEFAULTS);
     const parsed = JSON.parse(raw);
+    // `cull` may legacy-live under `entropy.cull` from older builds — migrate.
+    const legacyCull = parsed?.entropy?.cull;
     return {
       rule: sanitizeRule(parsed.rule),
       conwayMode: !!parsed.conwayMode,
+      cull: typeof parsed.cull === 'boolean' ? parsed.cull
+            : typeof legacyCull === 'boolean' ? legacyCull
+            : DEFAULTS.cull,
       entropy: sanitizeEntropy(parsed.entropy),
       bindings: {
         ...DEFAULTS.bindings,
@@ -61,7 +76,15 @@ function sanitizeEntropy(e) {
   const def = DEFAULTS.entropy;
   if (!e || typeof e !== 'object') return { ...def };
   const rate = Number.isFinite(e.rate) ? Math.max(0, Math.min(5, e.rate)) : def.rate;
-  return { enabled: !!e.enabled, rate, cull: !!e.cull };
+  const maxPop = Number.isFinite(e.maxPop)
+    ? Math.max(1, Math.floor(e.maxPop))
+    : def.maxPop;
+  return {
+    enabled: !!e.enabled,
+    rate,
+    maxPopEnabled: !!e.maxPopEnabled,
+    maxPop,
+  };
 }
 
 function sanitizeRule(s) {
@@ -101,6 +124,12 @@ export function setConwayMode(on) {
 /** Patch any subset of entropy options. */
 export function setEntropy(partial) {
   state.entropy = sanitizeEntropy({ ...state.entropy, ...partial });
+  save();
+  emit();
+}
+
+export function setCull(on) {
+  state.cull = !!on;
   save();
   emit();
 }

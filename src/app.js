@@ -38,10 +38,13 @@ const $importModal   = document.getElementById('import-modal');
 const $rleInput      = document.getElementById('rle-input');
 const $rleStatus     = document.getElementById('rle-status');
 const $rleLoad       = document.getElementById('rle-load');
-const $entropyEnabled = document.getElementById('entropy-enabled');
-const $entropyRate    = document.getElementById('entropy-rate');
-const $entropyRateVal = document.getElementById('entropy-rate-val');
-const $entropyCull    = document.getElementById('entropy-cull');
+const $entropyEnabled       = document.getElementById('entropy-enabled');
+const $entropyRate          = document.getElementById('entropy-rate');
+const $entropyRateVal       = document.getElementById('entropy-rate-val');
+const $entropyMaxPopEnabled = document.getElementById('entropy-maxpop-enabled');
+const $entropyMaxPop        = document.getElementById('entropy-maxpop');
+const $entropyMaxPopRow     = document.querySelector('.maxpop-row');
+const $cullEnabled          = document.getElementById('cull-enabled');
 
 // --- Populate presets ---
 for (const p of PRESETS) {
@@ -211,6 +214,8 @@ function updateHint() {
     [b.pan,    'pan'],
     [b.paint,  'paint'],
     [b.zoom,   'zoom'],
+    ['1–9',    'zoom level'],
+    ['0',      'recenter'],
     ['h',      'zen'],
     ['f',      'fullscreen'],
   ];
@@ -294,13 +299,19 @@ function refreshStepBackButton() {
  */
 function stepWorld() {
   life.step();
-  const e = settings.get().entropy;
+  const s = settings.get();
+  const e = s.entropy;
   // Cull and entropy gate independently. Either may be on without the other.
   const wantEntropy = e.enabled && e.rate > 0;
-  if (wantEntropy || e.cull) {
+  if (wantEntropy || s.cull) {
     const bounds = renderer.viewportBounds();
-    if (wantEntropy) entropy.tick(life, bounds, { rate: e.rate });
-    if (e.cull)      life.cull(bounds);
+    if (wantEntropy) {
+      entropy.tick(life, bounds, {
+        rate: e.rate,
+        maxPop: e.maxPopEnabled ? e.maxPop : null,
+      });
+    }
+    if (s.cull) life.cull(bounds);
   }
 }
 
@@ -540,6 +551,17 @@ function zoomViewportCenter(factor) {
   renderer.zoomAt(window.innerWidth / 2, window.innerHeight / 2, factor);
   dirty = true;
 }
+/**
+ * Jump to one of nine preset zoom levels (1 = fully zoomed out, 9 = fully
+ * zoomed in). Levels are spaced log-uniformly between renderer.minZoom and
+ * renderer.maxZoom so each step feels like the same multiplicative jump.
+ */
+function zoomToPresetLevel(n) {
+  if (n < 1 || n > 9) return;
+  const t = (n - 1) / 8;
+  const target = renderer.minZoom * Math.pow(renderer.maxZoom / renderer.minZoom, t);
+  zoomViewportCenter(target / renderer.zoom);
+}
 $zoomIn.addEventListener('click',  () => zoomViewportCenter(1.2));
 $zoomOut.addEventListener('click', () => zoomViewportCenter(1 / 1.2));
 $zenBtn.addEventListener('click',  () => setZen(!zen));
@@ -575,6 +597,10 @@ window.addEventListener('keydown', (e) => {
     case 'r': $reset.click(); break;
     case 'c': $clear.click(); break;
     case '0': $center.click(); break;
+    case '1': case '2': case '3': case '4': case '5':
+    case '6': case '7': case '8': case '9':
+      zoomToPresetLevel(+e.key);
+      break;
     case 's': openSettings(); break;
     case 'f': toggleFullscreen(); break;
     case 'h': setZen(!zen); break;
@@ -630,8 +656,15 @@ $entropyEnabled.addEventListener('change', () => {
 $entropyRate.addEventListener('input', () => {
   settings.setEntropy({ rate: +$entropyRate.value });
 });
-$entropyCull.addEventListener('change', () => {
-  settings.setEntropy({ cull: $entropyCull.checked });
+$entropyMaxPopEnabled.addEventListener('change', () => {
+  settings.setEntropy({ maxPopEnabled: $entropyMaxPopEnabled.checked });
+});
+$entropyMaxPop.addEventListener('input', () => {
+  const v = parseInt($entropyMaxPop.value, 10);
+  if (Number.isFinite(v) && v >= 1) settings.setEntropy({ maxPop: v });
+});
+$cullEnabled.addEventListener('change', () => {
+  settings.setCull($cullEnabled.checked);
 });
 
 function fmtEntropyRate(r) { return r.toFixed(1); }
@@ -695,11 +728,15 @@ function flashStatus(el, msg, kind) {
 function syncSettingsUI() {
   const s = settings.get();
   $conwayMode.checked = s.conwayMode;
+  $cullEnabled.checked = s.cull;
   $entropyEnabled.checked = s.entropy.enabled;
   $entropyRate.value      = s.entropy.rate;
   $entropyRateVal.textContent = fmtEntropyRate(s.entropy.rate);
   $entropyRate.style.setProperty('--pct', `${(s.entropy.rate / 5) * 100}%`);
-  $entropyCull.checked    = s.entropy.cull;
+  $entropyMaxPopEnabled.checked = s.entropy.maxPopEnabled;
+  $entropyMaxPop.value          = s.entropy.maxPop;
+  $entropyMaxPop.disabled       = !s.entropy.maxPopEnabled;
+  $entropyMaxPopRow.classList.toggle('disabled', !s.entropy.maxPopEnabled);
   for (const sel of $settingsModal.querySelectorAll('select[data-bind]')) {
     sel.value = s.bindings[sel.dataset.bind];
   }

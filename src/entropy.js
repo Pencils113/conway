@@ -36,12 +36,18 @@ const NEAR_LIFE_RADIUS = 8;    // max half-width of the "near" region around the
  *
  * @param {object} life                            Life instance.
  * @param {[number,number,number,number]} bounds   [wx0, wy0, wx1, wy1] viewport (inclusive).
- * @param {{ rate: number }} opts                  rate = expected events per generation.
+ * @param {{ rate: number, maxPop?: number|null }} opts
+ *        rate   - expected events per generation
+ *        maxPop - if set and life.population >= maxPop, this tick is a no-op.
+ *                 The cap can still be exceeded by normal evolution; entropy
+ *                 just refuses to add to it.
  * @returns {number} how many events actually fired.
  */
 export function tick(life, bounds, opts) {
   const rate = opts.rate;
   if (!rate || rate <= 0) return 0;
+  // Population cap — `Set.size` is intrinsically O(1), so this guard is free.
+  if (opts.maxPop != null && life.population >= opts.maxPop) return 0;
 
   // Whole part fires unconditionally; fractional part is a single Bernoulli trial.
   let events = Math.floor(rate);
