@@ -38,6 +38,7 @@ const $importModal   = document.getElementById('import-modal');
 const $rleInput      = document.getElementById('rle-input');
 const $rleStatus     = document.getElementById('rle-status');
 const $rleLoad       = document.getElementById('rle-load');
+const $coord                = document.getElementById('coord');
 const $entropyEnabled       = document.getElementById('entropy-enabled');
 const $entropyRate          = document.getElementById('entropy-rate');
 const $entropyRateVal       = document.getElementById('entropy-rate-val');
@@ -336,6 +337,7 @@ $stepBack.addEventListener('click', () => {
 $reset.addEventListener('click', () => {
   setPlaying(false);
   if (life.reset()) {
+    shiftMemory = null;
     refreshHighlights();
     updateStats();
     refreshStepBackButton();
@@ -345,6 +347,7 @@ $reset.addEventListener('click', () => {
 $clear.addEventListener('click', () => {
   setPlaying(false);
   life.clear();
+  shiftMemory = null;
   refreshHighlights();
   updateStats();
   refreshStepBackButton();
@@ -377,6 +380,7 @@ function loadCells(cells) {
   const cy = Math.round((Math.min(...ys) + Math.max(...ys)) / 2);
   life.load(cells, -cx, -cy);
   renderer.fitTo(life.bounds(), 0.25);
+  shiftMemory = null;
   refreshHighlights();
   updateStats();
   refreshStepBackButton();
@@ -400,6 +404,14 @@ let movedPastThreshold = false;
 let gesture = null;             // 'pan' | 'paint' | null
 let paintAdd = true;
 let lastPaintX = null, lastPaintY = null;
+
+// Anchor for shift-click line drawing. *Every* cell-modifying action updates
+// this — a plain click, a shift-click, a paint stroke. The next shift-click
+// uses it as the start of a straight line, in the recorded add/remove mode.
+// Cleared on clear/reset/load. shift+drag does *not* read this (it determines
+// its own mode by the cell under the press, then writes the new anchor at the
+// end of the stroke).
+let shiftMemory = null;         // { x: number, y: number, add: boolean } | null
 
 canvas.addEventListener('contextmenu', (e) => e.preventDefault());
 
@@ -427,6 +439,11 @@ canvas.addEventListener('pointerdown', (e) => {
 });
 
 canvas.addEventListener('pointermove', (e) => {
+  // Coord readout — update on every move, even when not pressing.
+  const [hx, hy] = renderer.screenToWorld(e.clientX, e.clientY);
+  $coord.textContent = `x ${hx}  y ${hy}`;
+  if ($coord.hidden) $coord.hidden = false;
+
   if (!pointerDown) return;
 
   if (!movedPastThreshold) {
@@ -445,9 +462,13 @@ canvas.addEventListener('pointermove', (e) => {
     } else if (cmd === 'paint') {
       gesture = 'paint';
       const [wx, wy] = renderer.screenToWorld(downX, downY);
+      // A paint stroke determines its own mode from the press cell — that's
+      // its core gesture. We still update the shift anchor here so a later
+      // shift-click extends from where the stroke started.
       paintAdd = !life.has(wx, wy);
       if (paintAdd) life.add(wx, wy); else life.remove(wx, wy);
       lastPaintX = wx; lastPaintY = wy;
+      shiftMemory = { x: wx, y: wy, add: paintAdd };
       canvas.classList.add('painting');
       refreshHighlights();
       updateStats();
@@ -465,6 +486,7 @@ canvas.addEventListener('pointermove', (e) => {
         if (paintAdd) life.add(x, y); else life.remove(x, y);
       });
       lastPaintX = wx; lastPaintY = wy;
+      shiftMemory = { x: wx, y: wy, add: paintAdd };
       refreshHighlights();
       updateStats();
       dirty = true;
@@ -480,13 +502,41 @@ canvas.addEventListener('pointerup', (e) => {
   pointerDown = false;
 
   if (!movedPastThreshold && gesture === null) {
-    const input = settings.clickInput(downSnap);
-    if (settings.commandForInput(input) === 'toggle') {
-      const [wx, wy] = renderer.screenToWorld(e.clientX, e.clientY);
-      life.toggle(wx, wy);
+    const [wx, wy] = renderer.screenToWorld(e.clientX, e.clientY);
+
+    if (downSnap.shiftKey && shiftMemory) {
+      // Shift-click with a prior anchor: draw a straight line from the anchor
+      // to here in the recorded add/remove mode, then move the anchor here.
+      const add = shiftMemory.add;
+      plotLine(shiftMemory.x, shiftMemory.y, wx, wy, (x, y) => {
+        if (add) life.add(x, y); else life.remove(x, y);
+      });
+      shiftMemory = { x: wx, y: wy, add };
       refreshHighlights();
       updateStats();
       dirty = true;
+    } else {
+      // Plain toggle path. Used for non-shift clicks bound to "toggle", and
+      // for shift-clicks that have no prior anchor yet (first action). Either
+      // way, the cell is toggled and becomes the new anchor — its post-toggle
+      // state determines whether the next shift-click line will add or remove.
+      let didToggle = false;
+      if (downSnap.shiftKey) {
+        life.toggle(wx, wy);
+        didToggle = true;
+      } else {
+        const input = settings.clickInput(downSnap);
+        if (settings.commandForInput(input) === 'toggle') {
+          life.toggle(wx, wy);
+          didToggle = true;
+        }
+      }
+      if (didToggle) {
+        shiftMemory = { x: wx, y: wy, add: life.has(wx, wy) };
+        refreshHighlights();
+        updateStats();
+        dirty = true;
+      }
     }
   }
 
@@ -499,6 +549,8 @@ canvas.addEventListener('pointercancel', () => {
   gesture = null;
   canvas.classList.remove('panning', 'painting');
 });
+
+canvas.addEventListener('pointerleave', () => { $coord.hidden = true; });
 
 canvas.addEventListener('wheel', (e) => {
   e.preventDefault();

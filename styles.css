@@ -79,6 +79,7 @@ body::before {
 .hud-tl { top: 16px; left: 16px; }
 .hud-tr { top: 16px; right: 16px; }
 .hud-bl { bottom: 16px; left: 16px; padding: 6px 10px; }
+.hud-br { bottom: 16px; right: 16px; padding: 6px 10px; }
 .hud-bc {
   bottom: 16px;
   left: 50%;
@@ -378,6 +379,17 @@ input[type="range"]::-moz-range-thumb {
 .hint .act {
   color: var(--text-faint);
   letter-spacing: 0.04em;
+}
+
+/* Cursor coordinate readout — bottom-right, fades with the rest of the HUD in zen. */
+.coord {
+  font-family: "SF Mono", ui-monospace, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: var(--text-dim);
+  letter-spacing: 0.04em;
+  font-variant-numeric: tabular-nums;
+  white-space: pre;
+  pointer-events: none;
 }
 
 /* ---------- Settings modal ---------- */
